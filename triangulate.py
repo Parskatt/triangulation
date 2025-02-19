@@ -1,6 +1,7 @@
 import numpy as np
 import scipy
 
+
 def rt_to_pose(R, t):
     T = np.eye(4)
     T[:3, :3] = R
@@ -21,7 +22,7 @@ def point_cam_towards(x, up):
     # x point in cam coords
     x = to_hom(x)
     front = x / np.linalg.norm(x)
-    up = up - (front * up).sum()*front
+    up = up - (front * up).sum() * front
     up = up / np.linalg.norm(up)
     right = -np.cross(front, up)
 
@@ -98,9 +99,7 @@ def lindstrom_find_image_observations(E, point1, point2):
     E_tilde = E[:2, :2]
 
     # Calculate epipolar lines
-    # n2 = E_tilde @ point1 + E[:2, 2]
     n2 = E_tilde @ point1 + E[:2, 2]
-    # n1 = E_tilde.T @ point2 + E[2, :2].T
     n1 = E_tilde.T @ point2 + E[2:3, :2].T.flatten()
 
     # Calculate intermediate values
@@ -109,8 +108,7 @@ def lindstrom_find_image_observations(E, point1, point2):
     c = point2_homogeneous.T @ E @ point1_homogeneous
     d = np.sqrt(b * b - a * c)
     if np.isnan(d):
-        d = 0.
-        # print("hej")
+        d = 0.0
 
     # Calculate lambda
     lambda_val = c / (b + d)
@@ -152,32 +150,34 @@ def random_inplane_rot():
         ]
     )
 
+
 def random_rotation(n):
-    Q = np.linalg.qr(np.random.randn(n,n))[0]
+    Q = np.linalg.qr(np.random.randn(n, n))[0]
     Q[0] *= np.linalg.det(Q)
     return Q
+
 
 def small_random_rotation(n, scale=0.1):
     # Generate random skew-symmetric matrix
     A = np.random.randn(n, n) * scale
     A = (A - A.T) / 2  # Make it skew-symmetric
-    
+
     # Matrix exponential gives rotation matrix
     return scipy.linalg.expm(A)
 
 
 if __name__ == "__main__":
-    up = np.array([0, 1., 0])
-    sigma_position = .01
-    sigma_obs = .0
-    sigma_rot = .01 # 0.1 rads ish 
-    N = 100
-    T = 100
-    fractions = np.zeros((N,T))
-    dists_niter2 = np.zeros((N,T))
-    dists_niter2_norm = np.zeros((N,T))
-    dists_midpoint = np.zeros((N,T))
-    dists_fused = np.zeros((N,T))
+    up = np.array([0, 1.0, 0])
+    sigma_position = 0.01
+    sigma_obs = 0.0
+    sigma_rot = 0.01  # 0.1 rads ish
+    N = 200
+    T = 200
+    fractions = np.zeros((N, T))
+    dists_niter2 = np.zeros((N, T))
+    dists_niter2_norm = np.zeros((N, T))
+    dists_midpoint = np.zeros((N, T))
+    dists_fused = np.zeros((N, T))
 
     preds = np.zeros((N, T, 3, 3))
 
@@ -193,56 +193,80 @@ if __name__ == "__main__":
         T_B = np.linalg.inv(rt_to_pose(R_B, c_B))
         relpose = T_B @ np.linalg.inv(T_A)
 
-
-        X = np.array([0, 0, 0.0, 1.0])
+        X = 10*to_hom(np.random.randn(3))#np.array([0, 0, 0.0, 1.0])
         x_A = from_hom(from_hom(T_A @ X))
         x_B = from_hom(from_hom(T_B @ X))
 
         for i in range(T):
             obs_A = x_A + sigma_obs * np.random.randn(2)
             obs_B = x_B + sigma_obs * np.random.randn(2)
-            # E = essential_from_pose(relpose[:3, :3], relpose[:3, 3])
             T_noisy_A = np.linalg.inv(
-                rt_to_pose(small_random_rotation(3, sigma_rot)@R_A, c_A + sigma_position * np.random.randn(3))
+                rt_to_pose(
+                    small_random_rotation(3, sigma_rot) @ R_A,
+                    c_A + sigma_position * np.random.randn(3),
+                )
             )
             T_noisy_B = np.linalg.inv(
-                rt_to_pose(small_random_rotation(3, sigma_rot)@R_B, c_B + sigma_position * np.random.randn(3))
+                rt_to_pose(
+                    small_random_rotation(3, sigma_rot) @ R_B,
+                    c_B + sigma_position * np.random.randn(3),
+                )
             )
             point_transform_A = point_cam_towards(obs_A, up)
             point_transform_B = point_cam_towards(obs_B, up)
             T_norm_noisy_A = point_transform_A @ T_noisy_A
             T_norm_noisy_B = point_transform_B @ T_noisy_B
 
-
             # no align
             X_midpoint_pred = midpoint_triangulation(T_noisy_A, T_noisy_B, obs_A, obs_B)
             relpose_noisy = T_noisy_B @ np.linalg.inv(T_noisy_A)
             E_noisy = essential_from_pose(relpose_noisy[:3, :3], relpose_noisy[:3, 3])
-            niter2_pred_A, niter2_pred_B = lindstrom_find_image_observations(E_noisy, obs_A, obs_B)
-            X_niter2_pred = midpoint_triangulation(T_noisy_A, T_noisy_B, niter2_pred_A, niter2_pred_B)
-
+            niter2_pred_A, niter2_pred_B = lindstrom_find_image_observations(
+                E_noisy, obs_A, obs_B
+            )
+            X_niter2_pred = midpoint_triangulation(
+                T_noisy_A, T_noisy_B, niter2_pred_A, niter2_pred_B
+            )
 
             # principal align
             principal_point = np.zeros(2)
-            # X_midpoint_pred = midpoint_triangulation(T_noisy_norm_A, T_noisy_norm_B, principal_point, principal_point)
             relpose_norm_noisy = T_norm_noisy_B @ np.linalg.inv(T_norm_noisy_A)
-            E_norm_noisy = essential_from_pose(relpose_norm_noisy[:3, :3], relpose_norm_noisy[:3, 3])
-            niter2_pred_A, niter2_pred_B = lindstrom_find_image_observations(E_norm_noisy, principal_point, principal_point)
-            X_niter2_norm_pred = midpoint_triangulation(T_norm_noisy_A, T_norm_noisy_B, niter2_pred_A, niter2_pred_B)
-            
-            dist_niter2 = np.linalg.norm(X_niter2_pred-from_hom(X))
-            dist_midpoint = np.linalg.norm(X_midpoint_pred-from_hom(X))
-            dist_fused = np.linalg.norm((X_midpoint_pred+X_niter2_norm_pred)/2-from_hom(X))
-            
-            dist_niter2_norm = np.linalg.norm(X_niter2_norm_pred-from_hom(X))
+            E_norm_noisy = essential_from_pose(
+                relpose_norm_noisy[:3, :3], relpose_norm_noisy[:3, 3]
+            )
+            niter2_pred_A, niter2_pred_B = lindstrom_find_image_observations(
+                E_norm_noisy, principal_point, principal_point
+            )
+            X_niter2_norm_pred = midpoint_triangulation(
+                T_norm_noisy_A, T_norm_noisy_B, niter2_pred_A, niter2_pred_B
+            )
 
-            dists_niter2[n,i] = dist_niter2
-            dists_niter2_norm[n,i] = dist_niter2_norm
-            dists_midpoint[n,i] = dist_midpoint
-            dists_fused[n,i] = dist_fused
+            dist_niter2 = np.linalg.norm(X_niter2_pred - from_hom(X))
+            dist_midpoint = np.linalg.norm(X_midpoint_pred - from_hom(X))
+            dist_fused = np.linalg.norm(
+                (X_midpoint_pred + X_niter2_norm_pred) / 2 - from_hom(X)
+            )
 
-            preds[n,i] = np.stack((X_niter2_pred, X_niter2_norm_pred, X_midpoint_pred), axis = -1) 
+            dist_niter2_norm = np.linalg.norm(X_niter2_norm_pred - from_hom(X))
+
+            dists_niter2[n, i] = dist_niter2
+            dists_niter2_norm[n, i] = dist_niter2_norm
+            dists_midpoint[n, i] = dist_midpoint
+            dists_fused[n, i] = dist_fused
+
+            preds[n, i] = np.stack(
+                (X_niter2_pred, X_niter2_norm_pred, X_midpoint_pred), axis=-1
+            )
     corr = np.einsum("tndu, tndv -> uv", preds, preds)
-    print(corr)
-    print("niter2 vs niter2 norm vs midpoint", dists_niter2.mean(), dists_niter2_norm.mean(), dists_midpoint.mean(), dists_fused.mean())
-    print("niter2 vs niter2 norm vs midpoint", np.median(dists_niter2), np.median(dists_niter2_norm), np.median(dists_midpoint), np.median(dists_fused))
+    print(
+        "niter2 vs niter2 norm vs midpoint (mean)",
+        1,
+        dists_niter2_norm.mean() / dists_niter2.mean(),
+        dists_midpoint.mean() / dists_niter2.mean(),
+    )
+    print(
+        "niter2 vs niter2 norm vs midpoint (median)",
+        1,
+        np.median(dists_niter2_norm) / np.median(dists_niter2),
+        np.median(dists_midpoint) / np.median(dists_niter2),
+    )
